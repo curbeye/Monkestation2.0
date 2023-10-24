@@ -61,7 +61,7 @@
 		"cheesy lines",
 		"will eat anything",
 		"wants to eat anything, constantly",
-		"frail but quick",
+		"produce rats",
 	)
 	input_obj_or_mob = list(
 		/obj/item/food/deadmouse,

@@ -11,6 +11,21 @@
 	bonus_deactivate_text = span_notice("Your DNA is no longer majority rat, and so fades your ventilation skills...")
 	bonus_traits = list(TRAIT_VENTCRAWLER_NUDE)
 
+	var/list/factions_to_remove = list()
+
+/datum/status_effect/organ_set_bonus/rat/on_apply()
+	. = ..()
+	if(!(FACTION_RAT in owner.faction))
+		factions_to_remove += FACTION_RAT
+	owner.faction |= list(FACTION_RAT)
+
+/datum/status_effect/organ_set_bonus/rat/on_remove()
+	. = ..()
+	for(var/faction in factions_to_remove)
+		owner.faction -= faction
+	//reset this for a different target
+	factions_to_remove = list()
+
 ///way better night vision, super sensitive. lotta things work like this, huh?
 /obj/item/organ/internal/eyes/night_vision/rat
 	name = "mutated rat-eyes"
@@ -43,7 +58,7 @@
 	greyscale_config = /datum/greyscale_config/mutant_organ
 	greyscale_colors = RAT_COLORS
 	/// Multiplier of [physiology.hunger_mod].
-	var/hunger_mod = 10
+	var/hunger_mod = 2
 
 /obj/item/organ/internal/stomach/rat/Initialize(mapload)
 	. = ..()
@@ -88,7 +103,7 @@
 		human_holder.physiology.hunger_mod /= hunger_mod
 	UnregisterSignal(stomach_owner, COMSIG_SPECIES_GAIN)
 
-/// makes you smaller, walk over tables, and take 1.5x damage
+
 /obj/item/organ/internal/heart/rat
 	name = "mutated rat-heart"
 	desc = "Rat DNA infused into what was once a normal heart."
@@ -97,34 +112,27 @@
 	icon_state = "heart"
 	greyscale_config = /datum/greyscale_config/mutant_organ
 	greyscale_colors = RAT_COLORS
+	var/cooldown = 45 SECONDS
+	var/on_cooldown
+
+	actions_types = list(/datum/action/item_action/organ_action/use)
 
 /obj/item/organ/internal/heart/rat/Initialize(mapload)
 	. = ..()
 	AddElement(/datum/element/organ_set_bonus, /datum/status_effect/organ_set_bonus/rat)
-	AddElement(/datum/element/noticable_organ, "hunch%PRONOUN_ES over unnaturally!")
-
-/obj/item/organ/internal/heart/rat/on_insert(mob/living/carbon/receiver)
-	. = ..()
-	if(!. || !ishuman(receiver))
+	AddElement(/datum/element/noticable_organ, "veins look a sickly black!")
+// spawns in a normal rat
+/obj/item/organ/internal/heart/rat/ui_action_click()
+	if(on_cooldown)
+		to_chat(owner, span_warning("You must wait [timeleft(on_cooldown)*0.1] seconds to use [src] again!"))
 		return
-	var/mob/living/carbon/human/human_receiver = receiver
-	if(!human_receiver.can_mutate())
+	var/rat_cap = CONFIG_GET(number/ratcap)
+	if(LAZYLEN(SSmobs.cheeserats) >= rat_cap)
+		to_chat(owner,span_warning("You've made too many rats!"))
 		return
-	human_receiver.dna.add_mutation(/datum/mutation/human/dwarfism)
-	//but 1.5 damage
-	if(human_receiver.physiology)
-		human_receiver.physiology.damage_resistance -= 50
-
-/obj/item/organ/internal/heart/rat/on_remove(mob/living/carbon/heartless, special)
-	. = ..()
-	if(!ishuman(heartless))
-		return
-	var/mob/living/carbon/human/human_heartless = heartless
-	if(!human_heartless.can_mutate())
-		return
-	human_heartless.dna.remove_mutation(/datum/mutation/human/dwarfism)
-	if(human_heartless.physiology)
-		human_heartless.physiology.damage_resistance += 50
+	new /mob/living/basic/mouse(owner.loc)
+	owner.visible_message(span_warning("[owner] vomits up a rat!"))
+	on_cooldown = addtimer(VARSET_CALLBACK(src, on_cooldown, null), cooldown , TIMER_STOPPABLE)
 
 /// you occasionally squeak, and have some rat related verbal tics
 /obj/item/organ/internal/tongue/rat
