@@ -19,7 +19,13 @@
 	///what we're infusing with
 	var/atom/movable/infusing_from
 	///what we're turning into
-	var/datum/infuser_entry/infusing_into
+	// var/datum/infuser_entry/infusing_into
+
+	//current XP, amounts of organs infused
+	var/progression = 0
+	//current XP Goal
+	var/progression_goal = DNA_INFUSER_PROG_ONE
+
 	///a message for relaying that the machine is locked if someone tries to leave while it's active
 	COOLDOWN_DECLARE(message_cooldown)
 
@@ -30,7 +36,7 @@
 /obj/machinery/dna_infuser/Destroy()
 	. = ..()
 	//dump_inventory_contents called by parent, emptying infusing_from
-	infusing_into = null
+	infusing_from = null
 
 /obj/machinery/dna_infuser/examine(mob/user)
 	. = ..()
@@ -46,14 +52,14 @@
 	. += span_notice("Subject enters the chamber, someone activates the machine. Voila! One of your organs has... changed!")
 	. += span_notice("Alt-click to eject the infusion source, if one is inside.")
 	if(max_tier_allowed < DNA_INFUSER_MAX_TIER)
-		. += span_boldnotice("Right now, the DNA Infuser can only infuse Tier [max_tier_allowed] entries.")
+		. += span_boldnotice("Right now, the DNA Infuser can only infuse Tier [max_tier_allowed] entries. Progression: [progression]/[progression_goal]")
 	else
-		. += span_boldnotice("Maximum tier unlocked. All DNA entries are possible.")
+		. += span_boldnotice("Maximum tier unlocked. All DNA entries are possible. Progression: [progression]")
 	. += span_notice("Examine further for more information.")
 
 /obj/machinery/dna_infuser/examine_more(mob/user)
 	. = ..()
-	. += span_notice("If you infuse a Tier [DNA_MUTANT_TIER_ONE] entry until it unlocks the bonus, it will upgrade the maximum tier and allow more complicated infusions.")
+	. += span_notice("If you infuse enough Tier [max_tier_allowed] entries, it will upgrade the maximum tier and allow more complicated infusions.")
 	. += span_notice("The maximum level it can reach is Tier [DNA_INFUSER_MAX_TIER].")
 
 /obj/machinery/dna_infuser/interact(mob/user)
@@ -79,36 +85,26 @@
 	visible_message(span_notice("[src] hums to life, beginning the infusion process!"))
 	var/fail_title = ""
 	var/fail_reason = ""
-	// Replace infusing_into with a [/datum/infuser_entry]
-	for(var/datum/infuser_entry/entry as anything in GLOB.infuser_entries)
-		if(entry.tier == DNA_MUTANT_UNOBTAINABLE)
-			continue
-		if(is_type_in_list(infusing_from, entry.input_obj_or_mob))
-			if(entry.tier > max_tier_allowed)
-				fail_title = "Overcomplexity"
-				fail_reason = "DNA too complicated to infuse. The machine needs to infuse simpler DNA first."
-			infusing_into = entry
-			break
-	if(!infusing_into)
-		//no valid recipe, so you get a fly mutation
-		if(!fail_reason)
-			fail_title = "Unknown DNA"
-			fail_reason = "Unknown DNA. Consult the \"DNA infusion book\"."
-		infusing_into = GLOB.infuser_entries[1]
+
+	var/datum/infuser_entry/entry = get_entry_from_organ(infusing_from)
+	if(!entry)
+		infusing = FALSE
+		return
+
 	playsound(src, 'sound/machines/blender.ogg', 50, vary = TRUE)
 	to_chat(human_occupant, span_danger("Little needles repeatedly prick you!"))
 	human_occupant.take_overall_damage(10)
-	human_occupant.add_mob_memory(/datum/memory/dna_infusion, protagonist = human_occupant, deuteragonist = infusing_from, mutantlike = infusing_into.infusion_desc)
+	human_occupant.add_mob_memory(/datum/memory/dna_infusion, protagonist = human_occupant, deuteragonist = infusing_from, mutantlike = entry.infusion_desc)
 	Shake(duration = INFUSING_TIME)
 	addtimer(CALLBACK(human_occupant, TYPE_PROC_REF(/mob, emote), "scream"), INFUSING_TIME - 1 SECONDS)
-	addtimer(CALLBACK(src, PROC_REF(end_infuse), fail_reason, fail_title), INFUSING_TIME)
+	addtimer(CALLBACK(src, PROC_REF(end_infuse), fail_reason, fail_title, entry), INFUSING_TIME)
 	update_appearance()
 
-/obj/machinery/dna_infuser/proc/end_infuse(fail_reason, fail_title)
+/obj/machinery/dna_infuser/proc/end_infuse(fail_reason, fail_title, datum/infuser_entry/entry)
 	if(infuse_organ(occupant))
-		to_chat(occupant, span_danger("You feel yourself becoming more... [infusing_into.infusion_desc]?"))
+		to_chat(occupant, span_danger("You feel yourself becoming more... [entry.infusion_desc]?"))
 	infusing = FALSE
-	infusing_into = null
+	infusing_from = null
 	QDEL_NULL(infusing_from)
 	playsound(src, 'sound/machines/microwave/microwave-end.ogg', 100, vary = FALSE)
 	if(fail_reason)
@@ -129,13 +125,12 @@
 /obj/machinery/dna_infuser/proc/infuse_organ(mob/living/carbon/human/target)
 	if(!ishuman(target))
 		return FALSE
-	var/obj/item/organ/new_organ = pick_organ(target)
-	if(!new_organ)
+	// var/obj/item/organ/new_organ = pick_organ(target)
+	if(!infusing_from)
 		return FALSE
 	// Valid organ successfully picked.
-	new_organ = new new_organ()
+	var/obj/item/organ/new_organ = infusing_from
 	new_organ.replace_into(target)
-	check_tier_progression(target)
 
 /// Picks a random mutated organ from the infuser entry which is also compatible with the target mob.
 /// Tries to return a typepath of a valid mutant organ if all of the following criteria are true:
@@ -143,35 +138,42 @@
 ///   - or the new organ must be external.
 /// 2. Target's pre-existing organ must be organic / not robotic.
 /// 3. Target must not have the same/identical organ.
-/obj/machinery/dna_infuser/proc/pick_organ(mob/living/carbon/human/target)
-	if(!infusing_into)
-		return FALSE
-	var/list/obj/item/organ/potential_new_organs = infusing_into.output_organs.Copy()
-	// Remove organ typepaths from the list if they're incompatible with target.
-	for(var/obj/item/organ/new_organ as anything in infusing_into.output_organs)
-		var/obj/item/organ/old_organ = target.get_organ_slot(initial(new_organ.slot))
-		if(old_organ)
-			if((old_organ.type != new_organ) && (old_organ.status != ORGAN_ROBOTIC))
-				continue // Old organ can be mutated!
-		else if(ispath(new_organ, /obj/item/organ/external))
-			continue // External organ can be grown!
-		// Internal organ is either missing, or is non-organic.
-		potential_new_organs -= new_organ
-	// Pick a random organ from the filtered list.
-	if(length(potential_new_organs))
-		return pick(potential_new_organs)
-	return FALSE
+// /obj/machinery/dna_infuser/proc/pick_organ(mob/living/carbon/human/target)
+// 	if(!infusing_into)
+// 		return FALSE
+// 	var/list/obj/item/organ/potential_new_organs = infusing_into.output_organs.Copy()
+// 	// Remove organ typepaths from the list if they're incompatible with target.
+// 	for(var/obj/item/organ/new_organ as anything in infusing_into.output_organs)
+// 		var/obj/item/organ/old_organ = target.get_organ_slot(initial(new_organ.slot))
+// 		if(old_organ)
+// 			if((old_organ.type != new_organ) && (old_organ.status != ORGAN_ROBOTIC))
+// 				continue // Old organ can be mutated!
+// 		else if(ispath(new_organ, /obj/item/organ/external))
+// 			continue // External organ can be grown!
+// 		// Internal organ is either missing, or is non-organic.
+// 		potential_new_organs -= new_organ
+// 	// Pick a random organ from the filtered list.
+// 	if(length(potential_new_organs))
+// 		return pick(potential_new_organs)
+// 	return FALSE
 
 /// checks to see if the machine should progress a new tier.
-/obj/machinery/dna_infuser/proc/check_tier_progression(mob/living/carbon/human/target)
-	if(
-		max_tier_allowed != DNA_INFUSER_MAX_TIER \
-		&& infusing_into.tier == max_tier_allowed \
-		&& target.has_status_effect(infusing_into.status_effect_type) \
-	)
+/obj/machinery/dna_infuser/proc/update_tier_experience(var/datum/infuser_entry/entry)
+	progression += entry.tier
+
+	if(max_tier_allowed != DNA_INFUSER_MAX_TIER \
+		&& progression >= progression_goal)
 		max_tier_allowed++
-		playsound(src.loc, 'sound/machines/ding.ogg', 50, TRUE)
-		visible_message(span_notice("[src] dings as it records the results of the full infusion."))
+		switch(max_tier_allowed)
+			if(1)
+				progression_goal = DNA_INFUSER_PROG_ONE
+			if(2)
+				progression_goal = DNA_INFUSER_PROG_TWO
+			if(3)
+				progression_goal = DNA_INFUSER_PROG_THREE
+		playsound(loc, 'sound/machines/ding.ogg', 50, TRUE)
+		visible_message(span_notice("[src] dings as it records the cumulative results of past infusions."))
+		progression = 0
 
 /obj/machinery/dna_infuser/update_icon_state()
 	//out of order
@@ -235,23 +237,85 @@
 	//we set drop to false to manually call it with an allowlist
 	dump_inventory_contents(list(occupant))
 
+/obj/machinery/dna_infuser/proc/get_entry(target)
+	for(var/datum/infuser_entry/entry as anything in GLOB.infuser_entries)
+		if(entry.tier == DNA_MUTANT_UNOBTAINABLE)
+			continue
+		if(is_type_in_list(target, entry.input_obj_or_mob))
+			if(entry.tier > max_tier_allowed)
+				visible_message(span_notice("DNA too complicated to infuse. The machine needs to infuse simpler DNA first."))
+				return
+			return entry
+
+/obj/machinery/dna_infuser/proc/get_entry_from_organ(target)
+	for(var/datum/infuser_entry/entry as anything in GLOB.infuser_entries)
+		if(entry.tier == DNA_MUTANT_UNOBTAINABLE)
+			continue
+		if(is_type_in_list(target, entry.output_organs))
+			if(entry.tier > max_tier_allowed)
+				visible_message(span_notice("DNA too complicated to infuse. The machine needs to infuse simpler DNA first."))
+				return
+			return entry
+
+/obj/machinery/dna_infuser/proc/get_organ(mob/user, target)
+	// Get the entry from the target
+	var/datum/infuser_entry/entry = get_entry(target)
+
+	if(!entry)
+		return
+
+	// Get an organ from the entry
+	var/list/obj/item/organ/possible_organs = entry.output_organs
+	if(!length(possible_organs))
+		to_chat(user, span_warning("No possible organs could be found!"))
+		return
+
+
+	var/list/choices = possible_organs.Copy()
+	choices += "Random Organ (free)"
+
+	var/chosen_organ = tgui_input_list(user, "Spend progression to choose an organ. Progression: [progression]. Cost: [entry.tier].", "Select an Organ", choices)
+
+	if(chosen_organ == "Random Organ (free)")
+		chosen_organ = pick(possible_organs)
+		update_tier_experience(entry)
+	else if(isnull(chosen_organ))
+		return FALSE
+	else
+		if(progression < entry.tier)
+			// to_chat(user, span_notice("Insufficient Progression. Cancelling insertion."))
+			balloon_alert(user, span_notice("Insufficient Progression."))
+			return FALSE
+
+		progression -= entry.tier
+
+	// turn the item into an organ
+	playsound(src, 'sound/machines/blender.ogg', 25, vary = TRUE)
+	to_chat(user, span_notice("[src] analyzes [target]!"))
+	QDEL_NULL(target)
+
+	var/obj/item/organ = new chosen_organ(loc)
+	user.put_in_hands(organ)
+
 // mostly good for dead mobs that turn into items like dead mice (smack to add).
 /obj/machinery/dna_infuser/proc/add_infusion_item(obj/item/target, mob/user)
+	// Check if they insert a valid organ.
+	if(is_valid_organ(target,user))
+		if(!user.transferItemToLoc(target, src))
+			to_chat(user, span_warning("[target] is stuck to your hand!"))
+			return
+		infusing_from = target
 	// if the machine already has a infusion target, or the target is not valid then no adding.
-	if(!is_valid_infusion(target, user))
-		return
-	if(!user.transferItemToLoc(target, src))
-		to_chat(user, span_warning("[target] is stuck to your hand!"))
-		return
-	infusing_from = target
+	else if(is_valid_infusion(target, user))
+		get_organ(user, target)
 
 // mostly good for dead mobs like corpses (drag to add).
 /obj/machinery/dna_infuser/MouseDrop_T(atom/movable/target, mob/user)
 	// if the machine is closed, already has a infusion target, or the target is not valid then no mouse drop.
 	if(!is_valid_infusion(target, user))
 		return
-	infusing_from = target
-	infusing_from.forceMove(src)
+
+	get_organ(user, target)
 
 /// Verify that the occupant/target is organic, and has mutable DNA.
 /obj/machinery/dna_infuser/proc/is_valid_occupant(mob/living/carbon/human/human_target, mob/user)
@@ -284,6 +348,18 @@
 			balloon_alert(user, "only creatures!")
 			return FALSE
 	else
+		return FALSE
+	return TRUE
+
+
+
+/obj/machinery/dna_infuser/proc/is_valid_organ(atom/movable/target, mob/user)
+	if(user.stat != CONSCIOUS || HAS_TRAIT(user, TRAIT_UI_BLOCKED) || !Adjacent(user) || !user.Adjacent(target) || !ISADVANCEDTOOLUSER(user))
+		return FALSE
+	if(infusing_from)
+		balloon_alert(user, "empty the machine first!")
+		return FALSE
+	if(!is_type_in_list(target, GLOB.infuser_organs))
 		return FALSE
 	return TRUE
 

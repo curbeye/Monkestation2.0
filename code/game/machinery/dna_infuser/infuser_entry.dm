@@ -1,5 +1,6 @@
 /// A list of all infuser entries
 GLOBAL_LIST_INIT(infuser_entries, prepare_infuser_entries())
+GLOBAL_LIST_INIT(infuser_organs, prepare_infuser_organs())
 
 /// Global proc that sets up each [/datum/infuser_entry] sub-type as singleton instances in a list, and returns it.
 /proc/prepare_infuser_entries()
@@ -15,6 +16,12 @@ GLOBAL_LIST_INIT(infuser_entries, prepare_infuser_entries())
 	var/list/sorted = sort_names(entries)
 	sorted.Insert(1, prepended)
 	return sorted
+
+/proc/prepare_infuser_organs()
+	var/list/organs = list()
+	for(var/datum/infuser_entry/entry as anything in GLOB.infuser_entries)
+		organs |= entry.output_organs
+	return organs
 
 /datum/infuser_entry
 	//-- Vars for DNA Infusion Book --//
