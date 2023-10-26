@@ -270,24 +270,29 @@
 		to_chat(user, span_warning("No possible organs could be found!"))
 		return
 
+	var/list/choices = list()
+	for(var/obj/item/organ/current_organ as anything in possible_organs)
+		choices |= initial(current_organ.name)
 
-	var/list/choices = possible_organs.Copy()
-	choices += "Random Organ (free)"
-
-	var/chosen_organ = tgui_input_list(user, "Spend progression to choose an organ. Progression: [progression]. Cost: [entry.tier].", "Select an Organ", choices)
+	var/chosen_organ = tgui_input_list(user, "Spend progression to choose an organ. Progression: [progression]. Cost: [entry.tier].", "Select an Organ", choices|"Random Organ (free)")
 
 	if(chosen_organ == "Random Organ (free)")
 		chosen_organ = pick(possible_organs)
+		// Award Progression + level up if doing a random organ
 		update_tier_experience(entry)
 	else if(isnull(chosen_organ))
 		return FALSE
 	else
+		// Apply Progression Cost
 		if(progression < entry.tier)
-			// to_chat(user, span_notice("Insufficient Progression. Cancelling insertion."))
 			balloon_alert(user, span_notice("Insufficient Progression."))
 			return FALSE
 
 		progression -= entry.tier
+
+		for(var/obj/item/organ/current_organ as anything in possible_organs)
+			if(chosen_organ == initial(current_organ.name))
+				chosen_organ = current_organ
 
 	// turn the item into an organ
 	playsound(src, 'sound/machines/blender.ogg', 25, vary = TRUE)
