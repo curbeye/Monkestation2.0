@@ -75,3 +75,25 @@
 	infusion_desc = "skittish"
 	tier = DNA_MUTANT_TIER_ONE
 	status_effect_type = /datum/status_effect/organ_set_bonus/rat
+
+/datum/infuser_entry/bee
+	name = "Bee"
+	infuse_mob_name = "bee"
+	desc = "Buzz....."
+	threshold_desc = ""
+	qualities = list(
+		"Turn your blood into a toxin that your punches inject into your enemies.",
+		"",
+		"",
+		"",
+	)
+	input_obj_or_mob = list(
+		/mob/living/basic/bee,
+		/obj/item/trash/bee,
+	)
+	output_organs = list(
+		/obj/item/organ/internal/heart/bee,
+	)
+	infusion_desc = "buzzy"
+	tier = DNA_MUTANT_TIER_ONE
+	status_effect_type = /datum/status_effect/organ_set_bonus/bee
